@@ -216,15 +216,19 @@ if "user" not in st.session_state:
 
 if st.session_state.user is None:
     st.title("💱 Global FX Calculator")
-    st.caption("Sign in or create an account to access the currency calculator.")
+    st.caption("Your Smart Foreign Exchange Calculator")
+    st.write("Choose how you would like to continue.")
 
-    login_tab, register_tab = st.tabs(["🔐 Login", "📝 Register"])
+    login_tab, register_tab, guest_tab = st.tabs(
+        ["🔐 Login", "📝 Register", "👤 Continue as Guest"]
+    )
 
     with login_tab:
+        st.subheader("Welcome back")
         with st.form("login_form"):
             login_value = st.text_input("Username or email")
             login_password = st.text_input("Password", type="password")
-            login_submitted = st.form_submit_button("Login", type="primary")
+            login_submitted = st.form_submit_button("Login", type="primary", use_container_width=True)
 
         if login_submitted:
             if not login_value.strip() or not login_password:
@@ -239,13 +243,14 @@ if st.session_state.user is None:
                     st.error("Invalid username/email or password.")
 
     with register_tab:
+        st.subheader("Create your Global FX account")
         with st.form("register_form", clear_on_submit=False):
             full_name = st.text_input("Full name")
             email = st.text_input("Email address")
             username = st.text_input("Choose a username")
             new_password = st.text_input("Create password", type="password")
             confirm_password = st.text_input("Confirm password", type="password")
-            register_submitted = st.form_submit_button("Create account", type="primary")
+            register_submitted = st.form_submit_button("Create account", type="primary", use_container_width=True)
 
         if register_submitted:
             if not all([full_name.strip(), email.strip(), username.strip(),
@@ -265,8 +270,28 @@ if st.session_state.user is None:
                 )
                 if success:
                     st.success(message)
+                    st.info("You can now open the Login tab and sign in.")
                 else:
                     st.error(message)
+
+    with guest_tab:
+        st.subheader("Explore Global FX as a guest")
+        st.write(
+            "Use the currency converter, live exchange rates, currency explorer, "
+            "comparison tools and analytics without creating an account."
+        )
+        st.info(
+            "Guest access does not save personal conversion history, favourites, "
+            "rate alerts or profile settings. Register or log in to use these features."
+        )
+        if st.button("👤 Continue as Guest", type="primary", use_container_width=True):
+            st.session_state.user = {
+                "id": None,
+                "full_name": "Guest",
+                "username": "guest",
+                "is_guest": True
+            }
+            st.rerun()
 
     st.stop()
 
@@ -719,7 +744,13 @@ except (ValueError, KeyError, TypeError) as error:
 # ==================================================
 
 current_user = st.session_state.user
-user_settings = get_user_settings(current_user["id"])
+is_guest = current_user.get("is_guest", False)
+
+# Guest users do not have a database user ID, so use temporary default settings.
+if is_guest:
+    user_settings = {"theme": "Light", "refresh_seconds": 900}
+else:
+    user_settings = get_user_settings(current_user["id"])
 
 if "theme" not in st.session_state:
     st.session_state.theme = user_settings["theme"]
@@ -747,7 +778,11 @@ else:
 
 st.sidebar.title("💱 GLOBAL FX")
 st.sidebar.caption("Foreign Exchange Calculator")
-st.sidebar.success(f"Welcome, {current_user['full_name']}")
+
+if is_guest:
+    st.sidebar.info("Welcome, Guest")
+else:
+    st.sidebar.success(f"Welcome, {current_user['full_name']}")
 
 page_groups = {
     "OVERVIEW": ["🏠 Dashboard", "📈 Live Exchange Rates"],
@@ -755,7 +790,17 @@ page_groups = {
     "PERSONAL": ["⭐ Favourite Currencies", "🔔 Rate Alerts", "📜 Conversion History", "👤 My Profile"],
     "MORE": ["⚙️ Settings", "ℹ️ About & Help"]
 }
-page_options = [item for group in page_groups.values() for item in group]
+
+# Guest users can access public tools only. Personal pages remain account-only.
+if is_guest:
+    page_options = (
+        page_groups["OVERVIEW"]
+        + page_groups["TOOLS"]
+        + ["ℹ️ About & Help"]
+    )
+else:
+    page_options = [item for group in page_groups.values() for item in group]
+
 page = st.sidebar.radio("NAVIGATION", page_options, label_visibility="collapsed")
 st.sidebar.divider()
 st.sidebar.caption(f"Currencies available: {len(currencies)}")
@@ -764,7 +809,7 @@ if st.sidebar.button("🔄 Refresh rates", use_container_width=True):
     get_currencies.clear()
     get_latest_rates.clear()
     st.rerun()
-if st.sidebar.button("🚪 Logout", use_container_width=True):
+if st.sidebar.button("🚪 Exit Guest" if is_guest else "🚪 Logout", use_container_width=True):
     st.session_state.user = None
     st.rerun()
 st.sidebar.caption("Indicative reference rates only")
@@ -786,7 +831,11 @@ for code, rate in rates.items():
     })
 rates_df = pd.DataFrame(rate_rows).sort_values("Currency Code")
 
-triggered_alerts = check_rate_alerts(current_user["id"], rates)
+if is_guest:
+    triggered_alerts = []
+else:
+    triggered_alerts = check_rate_alerts(current_user["id"], rates)
+
 for code, condition, target, actual in triggered_alerts:
     st.toast(f"Rate alert: USD/{code} is {actual:.6f} ({condition} {target:.6f})", icon="🔔")
 
@@ -801,8 +850,12 @@ if page == "🏠 Dashboard":
     a, b, c, d = st.columns(4)
     a.metric("Supported currencies", f"{len(currencies):,}")
     b.metric("Available exchange rates", f"{len(rates):,}")
-    c.metric("Your conversions", len(get_conversion_history(current_user["id"])))
-    d.metric("Favourite currencies", len(get_favourites(current_user["id"])))
+    if is_guest:
+        c.metric("Your conversions", "Login required")
+        d.metric("Favourite currencies", "Login required")
+    else:
+        c.metric("Your conversions", len(get_conversion_history(current_user["id"])))
+        d.metric("Favourite currencies", len(get_favourites(current_user["id"])))
     st.caption(f"Provider update: {latest_data.get('data_updated_at', 'Not supplied')} UTC  |  Source: {latest_data.get('source', 'Unknown')}")
     st.divider()
     st.subheader("Popular exchange rates · 1 USD equals")
@@ -867,7 +920,16 @@ elif page == "💱 Currency Converter":
             m1, m2 = st.columns(2)
             m1.metric("Converted amount", f"{result:,.4f} {to_currency}")
             m2.metric("Exchange rate", f"1 {from_currency} = {exchange_rate:.8f} {to_currency}")
-            save_conversion(from_currency, to_currency, amount, exchange_rate, result, current_user["id"])
+            if not is_guest:
+                save_conversion(
+                    from_currency, to_currency, amount,
+                    exchange_rate, result, current_user["id"]
+                )
+            else:
+                st.info(
+                    "Guest conversion is not saved. Log in or register "
+                    "to maintain your personal conversion history."
+                )
             st.caption("Actual bank, card or exchange-counter rates may include spreads and fees.")
 
 # ==================================================
@@ -1056,7 +1118,7 @@ elif page == "ℹ️ About & Help":
     st.markdown("**Technology used**")
     st.write("Python · Streamlit · Requests · Pandas · Plotly · SQLite · Exchange-rate API")
     st.markdown("**How to use the application**")
-    st.markdown("1. Create an account using Register and sign in.\n2. Open Currency Converter, choose source and target currencies, and enter an amount.\n3. Use Live Exchange Rates and Currency Comparison to inspect available rates.\n4. Save commonly used currencies in Favourite Currencies.\n5. Create a target in Rate Alerts. Alerts are checked when the app loads rate data.\n6. Review your previous conversions and download a PDF report from Conversion History.")
+    st.markdown("1. Choose Login to access an existing account, Register to create an account, or Continue as Guest to explore public tools.\n2. Open Currency Converter, choose source and target currencies, and enter an amount.\n3. Use Live Exchange Rates and Currency Comparison to inspect available rates.\n4. Registered users can save commonly used currencies in Favourite Currencies.\n5. Registered users can create targets in Rate Alerts. Alerts are checked when the app loads rate data.\n6. Registered users can review conversion history and download a PDF report. Guest conversions are not saved.")
     st.markdown("**Important information**")
     st.warning("Exchange rates are indicative reference values. The application does not transfer money, execute trades or include bank fees, card spreads, taxes or remittance charges. Data freshness and currency coverage depend on the API provider and subscription plan.")
     st.markdown("**Troubleshooting**")
@@ -1068,5 +1130,9 @@ elif page == "ℹ️ About & Help":
 st.divider()
 st.caption("Global FX Calculator | Python + Streamlit | Exchange-rate data supplied by the configured API provider")
 st.caption("Rates are indicative reference data, not guaranteed transaction or settlement prices. Provider freshness depends on its service, plan, market session and currency pair.")
+
+
+
+
 
 
